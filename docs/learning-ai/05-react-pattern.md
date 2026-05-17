@@ -1,443 +1,327 @@
-# 05 — ReAct 模式：思考→行动→观察
+# 05 — ReAct 模式：让 Agent 学会"思考→行动→观察"
 
 > **前置要求：** 完成 [04-prompt-engineering.md](04-prompt-engineering.md)
-> **学习目标：** 深入理解 ReAct 循环的工作原理、源码实现，以及它为什么是 AI Agent 的核心范式
+> **学习目标：** 深入理解 ReAct 循环的原理、agentUniverse 的源码实现、LLM 如何自主决定使用工具
 > **预计时间：** 2-3 天
 
 ---
 
-## 1. 为什么需要 ReAct？普通 LLM 调用的局限
+## 1. 为什么纯 LLM 不够用？
 
-### 1.1 普通 LLM 调用：一问一答
-
-```
-用户: "2026年5月17日的黄金价格是多少？"
-LLM:  "抱歉，我的知识截止于2024年，无法提供2026年的实时金价。"
-```
-
-LLM 的知识是"冻结的"——它只能基于训练数据回答，无法获取实时信息。
-
-### 1.2 有工具的 Agent：自己查
+### 1.1 普通 LLM 调用：一问一答，不会思考
 
 ```
-用户: "2026年5月17日的黄金价格是多少？"
+用户: "2026 年 5 月 17 日的黄金价格是多少？"
+LLM:  "抱歉，我的训练数据截止于 2024 年，无法提供 2026 年的实时数据。"
+```
+
+LLM 的知识是"冻结"的——它只能基于训练数据回答。不会自己查资料，不会自己验证，不会自己纠错。
+
+### 1.2 有 ReAct 的 Agent：自己会查
+
+```
+用户: "2026 年 5 月 17 日的黄金价格是多少？"
 Agent:
-  Thought: 我需要查询最新的黄金价格数据。
+  Thought: 我需要查询实时金价，用 google_search 工具。
   Action: google_search("2026年5月17日 黄金价格")
-  Observation: 搜索结果: COMEX黄金期货 $2,845/盎司...
+  Observation: COMEX 黄金期货 $2,845/盎司...
 
-  Thought: 我已经有了数据，可以整理回答了。
+  Thought: 数据有了，可以整理回复了。
   Final Answer: "2026年5月17日，COMEX黄金期货价格为 $2,845/盎司..."
 ```
 
-**这就是 ReAct 的核心价值：LLM 自己决定什么时候需要调用工具、调用哪个工具、怎么解读结果。**
+**这就是 ReAct 的核心价值：LLM 自己判断什么时候需要工具、用哪个工具、怎么解读结果、什么时候结束。框架只负责"给工具"和"把结果传回去"。**
 
 ---
 
-## 2. ReAct 是什么？
+## 2. ReAct = Reasoning + Acting
 
-**ReAct = Reasoning（推理）+ Acting（行动）**
-
-它是一个循环模式，Agent 在每一轮中：
-1. **Thought（推理）**：分析当前情况，决定下一步
-2. **Action（行动）**：调用工具或输出最终答案
-3. **Observation（观察）**：接收工具返回的结果或结束
-
-### 2.1 完整的 ReAct 循环
+ReAct 是 "Reasoning"（推理）和 "Acting"（行动）的合成词。每个循环包含三步：
 
 ```
-┌──────────────────────────────────────────────────────────────┐
-│ 用户输入: "今天北京天气如何？"                                    │
-├──────────────────────────────────────────────────────────────┤
-│                                                                │
-│  Round 1:                                                      │
-│    Thought: 我需要查询北京今天的天气，用 google_search 工具。    │
-│    Action: google_search("北京 天气 2026-05-17")               │
-│    Observation: "北京今日晴，15°C~25°C，北风3级"               │
-│    → 还没完成，进入 Round 2                                     │
-│                                                                │
-│  Round 2:                                                      │
-│    Thought: 我有天气数据了，整理成自然语言回复。                  │
-│    Action: Final Answer                                        │
-│    "北京今天天气晴朗，气温15到25摄氏度，北风3级..."              │
-│    → 完成！                                                    │
-│                                                                │
-└──────────────────────────────────────────────────────────────┘
+┌────────────────────────────────────────────┐
+│  Thought（思考）：分析现状，决定下一步       │
+│      ↓                                     │
+│  Action（行动）：调用工具 OR 输出最终答案     │
+│      ↓                                     │
+│  Observation（观察）：接收工具返回的结果      │
+│      ↓                                     │
+│  判断：完成了吗？没完成 → 回到 Thought       │
+└────────────────────────────────────────────┘
 ```
 
-### 2.2 ReAct 的 Prompt 格式（标准模板）
+### 2.1 ReAct 的 Prompt 格式（标准模板）
 
-ReAct 使用了一种特殊的 Prompt 格式来引导 LLM 按照 Thought → Action → Observation 的模式输出：
+ReAct 使用一种特殊的格式引导 LLM 输出：
 
 ```
-Thought: [你当前的推理]
+Thought: [你当前的推理过程]
 Action: [工具名称]
-Action Input: [工具参数]
-Observation: [工具返回结果]
-...（重复）...
-Thought: 我现在可以给出最终答案了
-Final Answer: [最终回答]
+Action Input: [工具参数 JSON]
+Observation: [工具返回结果 — 由框架注入]
+...（多轮循环）...
+Thought: 我现在有足够信息了
+Final Answer: [最终自然语言回答]
+```
+
+### 2.2 一个完整的双轮例子
+
+```
+用户输入: "帮我算 123 * 456，用中文告诉我结果"
+Agent 有 python_runner 工具
+
+═══════════════════════════════════════════
+Round 1
+═══════════════════════════════════════════
+
+Thought: 我需要计算 123 × 456。我可以用 python_runner 执行 Python 代码。
+Action: python_runner
+Action Input: {"input": "print(123 * 456)"}
+
+→ 框架执行 python_runner.execute(input="print(123 * 456)")
+→ Observation: 56088
+
+═══════════════════════════════════════════
+Round 2
+═══════════════════════════════════════════
+
+Thought: 我得到了计算结果 56088，可以整理成中文回答。
+Final Answer: 123 乘以 456 的结果是 56088（五万六千零八十八）。
 ```
 
 ---
 
 ## 3. agentUniverse 中的 ReAct 实现
 
-### 3.1 源码架构
+### 3.1 代码分层架构
 
 ```
-Agent 层
-  └─ ReActAgentTemplate (agent/template/react_agent_template.py)
-       │  使用 ReAct 专用 Planner
-       ▼
-Planner 层
-  └─ ReActPlanner (agent/plan/planner/react_planner/react_planner.py)
-       │  组装 Prompt + Tool + LLM，交给 LangChain AgentExecutor
-       ▼
-执行层 (LangChain)
-  └─ AgentExecutor
-       │  执行 Thought → Action → Observation 循环
-       ▼
-LLM API
+Agent 层: ReActAgentTemplate (agent/template/react_agent_template.py)
+  │  Agent 模板，使用 ReAct 专用 Planner
+  ▼
+Planner 层: ReActPlanner (agent/plan/planner/react_planner/react_planner.py)
+  │  组装 Prompt + Tool + LLM，交给 LangChain 的 AgentExecutor
+  ▼
+执行层 (LangChain): AgentExecutor
+  │  控制 Thought → Action → Observation 的循环执行
+  ▼
+LLM API: 真正的 AI 推理
 ```
 
-### 3.2 ReActPlanner.invoke() 完整源码走读
+### 3.2 ReActPlanner.invoke() 源码穿透
 
 ```python
 # agentuniverse/agent/plan/planner/react_planner/react_planner.py:46-77
-def invoke(self, agent_model: AgentModel, planner_input: dict,
-           input_object: InputObject) -> dict:
+def invoke(self, agent_model, planner_input, input_object) -> dict:
+    """ReAct 核心执行 — 7 个步骤"""
 
-    # 步骤 1：加载 Memory（对话历史）
-    memory: Memory = self.handle_memory(agent_model, planner_input)
+    # ① 加载 Memory — 获取历史对话
+    memory = self.handle_memory(agent_model, planner_input)
 
-    # 步骤 2：获取 LLM 实例（大脑）
-    llm: LLM = self.handle_llm(agent_model)
+    # ② 获取 LLM — 从 LLMManager 取实例
+    llm = self.handle_llm(agent_model)
 
-    # 步骤 3：获取所有注册的 Tool 并转为 LangChain 工具格式
+    # ③ 获取所有 Tool — 从 ToolManager 取，转为 LangChain 格式
     tools = self.acquire_tools(agent_model.action)
 
-    # 步骤 4：组装 Prompt（系统指令 + 工具描述 + 用户输入）
-    prompt: Prompt = self.handle_prompt(agent_model, planner_input)
+    # ④ 组装 Prompt — 注入工具描述 + 用户输入
+    prompt = self.handle_prompt(agent_model, planner_input)
 
-    # 步骤 5：创建 ReAct Agent
+    # ⑤ 创建 ReAct Agent（LangChain）
     agent = create_react_agent(
-        llm.as_langchain(),     # LLM
-        tools,                   # 工具列表
-        prompt.as_langchain(),  # Prompt 模板
-        stop_sequence=['\nObservation'],  # 停止标记
+        llm.as_langchain(),
+        tools,
+        prompt.as_langchain(),
+        stop_sequence=['\nObservation'],  # ★ 关键：告诉 LLM 在 Action 后停止
         bind_params=agent_model.llm_params()
     )
 
-    # 步骤 6：包装为 AgentExecutor（添加循环控制）
+    # ⑥ 包装为 AgentExecutor（添加循环控制 + 安全阀）
     agent_executor = AgentExecutor(
         agent=agent,
         tools=tools,
-        verbose=True,                      # 打印详细日志
-        handle_parsing_errors=True,        # 解析错误时自动重试
-        max_iterations=15                  # ★ 最多 15 轮！
+        verbose=True,                  # 打印详细日志（调试神器）
+        handle_parsing_errors=True,    # 解析出错自动重试
+        max_iterations=15              # ★ 最多 15 轮！安全阀
     )
 
-    # 步骤 7：执行
+    # ⑦ 执行！
     return agent_executor.invoke(
         input=planner_input,
         memory=memory.as_langchain() if memory else None,
         chat_history=planner_input.get('chat_history'),
-        config=self.get_run_config(agent_model, input_object)
+        ...
     )
 ```
 
-### 3.3 create_react_agent() 函数详解
+### 3.3 create_react_agent() 的三个关键设计
 
 ```python
-# react_planner/react_planner.py:150-184（简化）
-def create_react_agent(llm, tools, prompt, output_parser=None, stop_sequence=True, bind_params=None):
-    # 1. 给 Prompt 注入工具描述（告诉 LLM 有哪些工具可用）
+def create_react_agent(llm, tools, prompt, ...):
+    # ① 注入工具描述到 Prompt — 告诉 LLM 有哪些工具、怎么用
     prompt = prompt.partial(
-        tools=render_text_description(list(tools)),    # 工具描述
-        tool_names=", ".join([t.name for t in tools]), # 工具名称列表
+        tools=render_text_description(list(tools)),    # 工具描述文本
+        tool_names=", ".join([t.name for t in tools]), # 工具名列表
     )
 
-    # 2. 给 LLM 绑定 stop word（遇到 \nObservation 就停止输出）
-    llm_with_stop = llm.bind(stop=["\nObservation"], **(bind_params or {}))
+    # ② 给 LLM 绑定 stop word — 生成 Action 后自动停止
+    llm_with_stop = llm.bind(stop=["\nObservation"], **bind_params)
 
-    # 3. 构建 Agent 执行链
+    # ③ 构建处理链
     agent = (
         RunnablePassthrough.assign(
-            # 把之前的执行步骤格式化为 scratchpad
+            # ★ 把之前的步骤格式化为 scratchpad
             agent_scratchpad=lambda x: format_log_to_str(x["intermediate_steps"]),
         )
-        | prompt                # 注入 Prompt
-        | llm_with_stop         # 调用 LLM
-        | output_parser         # 解析 LLM 输出（提取 Thought/Action）
+        | prompt              # 注入 Prompt（含工具描述）
+        | llm_with_stop       # 调用 LLM（遇 Observation 就停）
+        | output_parser       # 解析 LLM 输出 → 提取 Thought / Action
     )
     return agent
 ```
 
-**三个关键设计：**
+**三个关键设计的解释：**
 
-1. **工具描述注入**：Prompt 中的 `{tools}` 和 `{tool_names}` 占位符被替换为实际的工具信息，告诉 LLM 有什么工具、怎么用。
+1. **工具描述注入（`tools` 占位符）** — Prompt 模板中的 `{tools}` 和 `{tool_names}` 被替换为实际的工具信息。这样 LLM 才知道"我有哪些武器可用"。
 
-2. **stop word `\nObservation`**：LLM 输出到 `Action: xxx` 后停止，由框架执行工具并将结果以 `\nObservation: xxx` 格式追加回 Prompt。这样 LLM 不需要生成 Observation（那是框架的工作），只需要生成 Thought 和 Action。
+2. **stop word `\nObservation`** — LLM 生成到 `Action: xxx` 后自动停止，因为框架会负责执行工具并注入 `\nObservation: 结果`。LLM 不需要（也不应该）自己编造 Observation。
 
-3. **agent_scratchpad**：自动格式化之前的执行历史（Thought → Action → Observation），让 LLM 看到"之前发生了什么"。
+3. **agent_scratchpad** — 把之前的所有循环步骤（Thought → Action → Observation）格式化后塞进新 Prompt，让 LLM 看到"我之前做了什么"。这样 LLM 不会重复调用同一个工具或忘记之前的推理。
 
-### 3.4 max_iterations：安全阀
+### 3.4 `max_iterations=15`：为什么需要安全阀？
 
 ```python
 AgentExecutor(..., max_iterations=15)
 ```
 
-这意味着 Agent 最多执行 15 轮 Thought-Action-Observation 循环。如果 15 轮后还没给出 Final Answer，AgentExecutor 会强制返回。这是防止 LLM "死循环"（反复调用同一个工具得不到结果）的关键保护。
+如果 LLM 陷入"死循环"——比如反复调用同一个工具但得不到有效结果——15 轮后 AgentExecutor 会强制终止并返回当前状态。防止：
+- LLM 幻觉导致无限循环
+- Token 成本失控（每轮调用都要花钱）
+- 用户请求超时
 
 ---
 
-## 4. ReAct 循环的完整执行过程
+## 4. Tool 与 ReAct 的交互机制
 
-以下以 "帮我查一下比特币价格，然后乘以2告诉我" 为例，展示 AgentExecutor 内部的执行流程：
+### 4.1 Tool 如何被 LLM 发现？
 
-```
-══════════════════════════════════════════════════════════
-Round 1
-══════════════════════════════════════════════════════════
-
-→ 当前 Prompt（发送给 LLM）:
-  """
-  你可以使用以下工具：
-  - google_search: 搜索实时信息
-  - python_runner: 执行 Python 代码
-
-  用户问题：帮我查一下比特币价格，然后乘以2告诉我
-
-  {agent_scratchpad}   ← 第一轮是空的
-  """
-
-← LLM 输出:
-  """
-  Thought: 我需要先查询比特币的当前价格，然后乘以2。
-  Action: google_search
-  Action Input: "比特币 当前价格 2026年5月"
-  """
-
-→ 框架解析：提取 Action=google_search, Input="比特币..."
-→ 框架执行：google_search.run("比特币 当前价格 2026年5月")
-→ Observation: "比特币当前价格 $87,234"
-
-══════════════════════════════════════════════════════════
-Round 2
-══════════════════════════════════════════════════════════
-
-→ 当前 Prompt:
-  """
-  ...（同上，工具描述）...
-
-  {agent_scratchpad}
-  Thought: 我需要先查询比特币的当前价格，然后乘以2。
-  Action: google_search
-  Action Input: "比特币 当前价格 2026年5月"
-  Observation: 比特币当前价格 $87,234
-  """
-
-← LLM 输出:
-  """
-  Thought: 我有了比特币价格 $87,234。现在需要用 python_runner 计算乘以2。
-  Action: python_runner
-  Action Input: print(87234 * 2)
-  """
-
-→ 框架执行：python_runner.run("print(87234 * 2)")
-→ Observation: "174468"
-
-══════════════════════════════════════════════════════════
-Round 3
-══════════════════════════════════════════════════════════
-
-→ 当前 Prompt:
-  """
-  ...（工具描述）...
-
-  {agent_scratchpad}
-  ...Round 1 and Round 2 history...
-  Observation: 174468
-  """
-
-← LLM 输出:
-  """
-  Thought: 我得到了结果，可以输出最终答案。
-  Final Answer: 比特币当前价格为 $87,234，乘以2后为 $174,468。
-  """
-
-→ 检测到 Final Answer → 退出循环
-→ 返回: {'output': '比特币当前价格为 $87,234，乘以2后为 $174,468。'}
-```
-
----
-
-## 5. Tool 与 ReAct 的交互
-
-### 5.1 工具如何被 LLM 发现？
+框架将所有 Tool 的描述拼接成一个字符串，注入到 Prompt 中：
 
 ```python
-# react_planner.py:108-147
-def handle_prompt(self, agent_model, planner_input):
-    # ★ 获取所有工具并拼接描述字符串
-    tools_str = ''
-    for tool in self.acquire_tools(agent_model.action):
-        tools_str += f"tool name: {tool.name} tool description: {tool.description}\n"
+# react_planner.py 中的 acquire_tools 和 handle_prompt
+tools_str = ''
+for tool in tools:
+    tools_str += f"tool name: {tool.name}\ntool description: {tool.description}\n"
 
-    # ★ 注入到 Prompt 的 {tools} 和 {tool_names} 占位符
-    planner_input['tools'] = tools_str
-    planner_input['tool_names'] = '|'.join([t.name for t in tools])
+planner_input['tools'] = tools_str
+planner_input['tool_names'] = '|'.join([t.name for t in tools])
 ```
 
-**工具的 `description` 决定了 LLM 会不会调用它。**如果 description 写得不清楚，LLM 可能根本不会用。
+**所以 Tool 的 `description` 是给 LLM 看的——它是决定 LLM 会不会用你的 Tool 的最关键因素。**
 
-### 5.2 Tool 的 langchain_run 方法
+### 4.2 Tool 执行链路
 
-```python
-# agentuniverse/agent/action/tool/tool.py
-def langchain_run(self, *args, callbacks=None, **kwargs):
-    """LangChain 调用入口"""
-    # ReAct 模式传入的是 JSON 格式的字符串
-    parse_result = parse_and_check_json_markdown(args[0], self.input_keys)
-    return self.execute(**parse_result)
 ```
+LLM 输出: Action: google_search
+          Action Input: {"query": "比特币价格"}
 
-**关键理解：** LLM 生成的 `Action Input` 是一个 JSON 字符串，框架解析后传给 `tool.execute(**params)`。
+框架解析:
+  → 提取 Action = "google_search"
+  → 提取 Action Input = '{"query": "比特币价格"}'
+
+Tool 执行:
+  → tool.langchain_run('{"query": "比特币价格"}')
+  → parse_and_check_json_markdown() → {'query': '比特币价格'}
+  → tool.run(query='比特币价格')
+  → tool.execute(query='比特币价格')
+  → 返回: "比特币当前价格 $87,234"
+
+框架处理:
+  → 格式化为: \nObservation: 比特币当前价格 $87,234
+  → 追加到 agent_scratchpad
+  → 进入下一轮循环
+```
 
 ---
 
-## 6. ReActAgentTemplate：Agent 模板层
+## 5. ReAct 的局限和应对
 
-### 6.1 继承关系
-
-```
-ComponentBase → Agent → AgentTemplate → ReActAgentTemplate
-```
-
-```python
-# agentuniverse/agent/template/react_agent_template.py:37-52
-class ReActAgentTemplate(AgentTemplate):
-    """ReAct 模式的 Agent 模板"""
-
-    agent_names: Optional[list[str]] = None       # 子 Agent 列表
-    stop_sequence: Optional[list[str]] = None      # 自定义停止序列
-    max_iterations: Optional[int] = None           # 最大迭代次数
-
-    def input_keys(self) -> list[str]:
-        return ['input']
-
-    def output_keys(self) -> list[str]:
-        return ['output']
-
-    def parse_input(self, input_object: InputObject, agent_input: dict) -> dict:
-        agent_input['input'] = input_object.get_data('input')
-        tools_context = self.build_tools_context()
-        ...
-```
-
-### 6.2 Agent 如何绑定到 ReAct 模板
-
-在 YAML 中：
-
-```yaml
-# simple_qa_agent.yaml
-metadata:
-  type: 'AGENT'
-  module: 'agentuniverse.agent.template.react_agent_template'
-  class: 'ReActAgentTemplate'
-```
-
-`class: 'ReActAgentTemplate'` 意味着实例化时使用这个类。但 Planner 的绑定是隐式的——ReActAgentTemplate 内部 `execute()` 方法调用的是 `PlannerManager().get_instance_obj('react_planner')`（如果没有显式配置 Planner 则需要框架默认注入）。
+| 局限 | 原因 | agentUniverse 的缓解方式 |
+|------|------|------------------------|
+| **Tool 选择失误** | LLM 理解不准确 | `handle_parsing_errors=True` 自动重试 |
+| **无限循环** | LLM 死磕一个问题 | `max_iterations=15` 强制终止 |
+| **解析失败** | LLM 输出格式不符合预期 | `output_parser` + 自动重试 |
+| **幻觉** | LLM 编造 Observation | stop word `\nObservation` 防止 LLM 编造 |
+| **Token 消耗大** | 多轮循环每轮都调用 LLM | 合理设置 `max_iterations` 和 `max_tokens` |
 
 ---
 
-## 7. ReAct 的局限与改进
+## 6. agentUniverse 中的不同 Planner
 
-### 7.1 局限性
+ReAct 不是唯一的 Planner，agentUniverse 还有：
 
-| 问题 | 说明 | 缓解方式 |
-|------|------|---------|
-| **Tool 选择失误** | LLM 可能选错工具 | 提高 Tool description 质量 |
-| **解析失败** | LLM 输出格式不符合预期 | `handle_parsing_errors=True` 自动重试 |
-| **无限循环** | LLM 反复调用同一个工具 | `max_iterations=15` 强制终止 |
-| **幻觉** | 错误理解工具返回结果 | 在 Prompt 中强调"基于 Observation 回答" |
-| **Token 成本** | 多轮循环消耗大量 token | 合理设置 `max_tokens` 和迭代上限 |
-
-### 7.2 与多模式 Planner 的关系
-
-agentUniverse 不只 ReAct 一种 Planner，还有：
-
-| Planner | 适用场景 | 与 ReAct 的区别 |
+| Planner | 适用场景 | 与 ReAct 的关系 |
 |---------|---------|---------------|
-| `ReActPlanner` | 通用推理+工具调用 | Thought-Action-Observation 循环 |
-| `RagPlanner` | 知识库查询 | 偏重检索，轻推理 |
+| `ReActPlanner` | 通用推理 + 工具调用 | 基础范式 |
+| `RagPlanner` | 知识库问答 | ReAct 变体（偏检索，轻推理） |
 | `PeerPlanner` | PEER 多 Agent | 每个步骤是一个子 Agent |
 | `ExecutingPlanner` | 知识整合 | 侧重信息整理而非工具调用 |
-| `ReviewingPlanner` | 质量评审 | 侧重评分和反馈生成 |
+| `ReviewingPlanner` | 质量评审 | 侧重评分和反馈 |
 
 ---
 
-## 8. 动手练习
+## 7. 动手练习
 
 ### 练习 1：追踪 ReActPlanner.invoke() 源码
 
-打开 `agentuniverse/agent/plan/planner/react_planner/react_planner.py`，逐行阅读 `invoke()` 方法。在代码旁边标注每个步骤的作用。
+打开 `agentuniverse/agent/plan/planner/react_planner/react_planner.py`，逐行阅读 `invoke()` 方法。标注每个步骤的作用和输入输出。
 
-### 练习 2：理解 create_react_agent 流水线
-
-画出 `create_react_agent` 中的链式处理流程：
-```
-Input → RunnablePassthrough.assign(agent_scratchpad) → prompt → llm_with_stop → output_parser
-```
-每一步的输入和输出是什么？
-
-### 练习 3：调试 react_agent_app
+### 练习 2：运行 react_agent_app 观察循环
 
 ```bash
 cd examples/sample_apps/react_agent_app
+# 配置 API Key 后启动
+python bootstrap/intelligence/server_application.py
 ```
+问一个需要工具的复杂问题，观察控制台输出的 `verbose` 日志（每轮 Thought 和 Action）。
 
-1. 启动服务
-2. 问一个需要工具的问题（比如"帮我查一下最新的AI新闻"）
-3. 观察控制台输出的 verbose 日志（每轮 Thought 和 Action）
-4. 数一数总共执行了几轮
+### 练习 3：修改 max_iterations 看效果
 
-### 练习 4：修改 max_iterations
+把 `max_iterations` 从 15 改为 2，问需要多步工具调用的问题。观察第 2 轮后被强制终止时的输出。
 
-在 ReAct Agent 的 YAML 配置中，将 `plan.planner.max_iterations` 改为 `2`。然后问一个需要多步工具调用的问题，观察 Agent 在第 2 轮后被强制终止时的输出。
+### 练习 4：手动模拟 ReAct
 
-### 练习 5：手动模拟
+不用代码，用纸笔模拟以下场景的完整 ReAct 循环：
 
-不用代码，用纸笔模拟以下场景的 ReAct 循环：
+> 用户: "巴黎人口多少？把这个数字的平方根算出来，用中文回答。"
+> Agent 有: google_search 和 python_runner
 
-- 用户问："巴黎的人口是多少？把这个数字的平方根算出来。"
-- Agent 有 `google_search` 和 `python_runner` 两个工具
+写出每一轮的 Thought → Action → Observation，直到 Final Answer。
 
-写出每一轮的：Thought → Action → Observation，直到最终输出。
+### 练习 5：理解 stop word 机制
+
+在 `create_react_agent()` 中，`stop=["\nObservation"]` 的作用是什么？如果去掉这个 stop word，会发生什么？试着推理。
 
 ---
 
-## 9. 概念速查表
+## 8. 概念速查表
 
 | 概念 | 含义 | 关键位置 |
 |------|------|---------|
-| **ReAct** | Reasoning + Acting 循环模式 | 本文全篇 |
+| **ReAct** | Reasoning + Acting 循环 | 本文核心 |
 | **Thought** | LLM 的推理步骤 | ReAct Prompt 格式 |
-| **Action** | 调用的工具名称 | — |
-| **Observation** | 工具返回结果 | 由框架注入 |
+| **Action** | 调用的工具名 + 参数 | — |
+| **Observation** | 工具返回结果（框架注入） | — |
 | **ReActPlanner** | agentUniverse 的 ReAct 实现 | `react_planner/react_planner.py` |
 | **create_react_agent()** | 构建 ReAct 执行链 | `react_planner.py:150` |
 | **AgentExecutor** | LangChain 的循环控制器 | `react_planner.py:70` |
-| **max_iterations** | 最大循环轮数（安全阀） | 默认 15 |
+| **max_iterations** | 最大循环轮数（安全阀，默认 15） | — |
 | **agent_scratchpad** | 历史步骤的格式化字符串 | `format_log_to_str()` |
-| **stop_sequence** | LLM 输出停止标记 | `"\nObservation"` |
+| **stop_sequence** | LLM 停止标记（`\nObservation`） | `create_react_agent()` |
 | **ReActAgentTemplate** | ReAct 模式的 Agent 模板 | `agent/template/react_agent_template.py` |
 
 ---
 
 ## 下一步
 
-你已经理解了 ReAct 模式——Agent 如何通过"思考→行动→观察"循环自主解决问题。
-
-下一步进入 **06-tool-system.md**，学习 Tool 系统——如何为 Agent 编写自定义工具、工具的注册流程、以及 Tool 与 ReAct 的深度交互。
+你已经完全理解了 ReAct 循环。下一步进入 **[06-tool-system.md](06-tool-system.md)**——学习如何为 Agent 编写自定义 Tool，让 Agent 能调用任何你需要的功能。

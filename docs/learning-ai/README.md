@@ -80,6 +80,12 @@ poetry install
 
 ---
 
+## 开始之前：先学会怎么读
+
+**强烈建议在开始学习之前，先花 20 分钟阅读这篇文章：**
+
+- [如何高效阅读这套文档 —— 从"读过就忘"到"真正掌握"](reading-methods/01-how-to-read-this-guide.md) — 基于认知科学的学习方法，让你 12 章的知识留存率从 10% 提升到 50%+
+
 ## 补充阅读
 
 - [pyproject.toml 完全指南（Node.js 工程师视角）](python-ecosystem/pyproject-toml-guide.md) — 读完 01 后建议看这篇，理解 Python 的包管理生态
