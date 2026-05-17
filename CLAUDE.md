@@ -2,6 +2,13 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+我是一位资深的全栈工程师，正在学习ai agent。我的技术栈是node.js，我对于python语言还不是
+很掌握。我正在学习这个项目，目的是为了自己能掌握python的同时，全面系统的掌握并理解本项目ai agent
+的所有重点知识点。
+
+注意，当我要求你生成文档的时候，你的文档风格应该做到通俗易懂，
+多使用比喻、类比等修辞手法来使得读起来不那么生涩。
+
 ## Development Commands
 
 **Setup:**
@@ -257,11 +264,24 @@ python examples/sample_apps/workflow_agent_app/bootstrap/platform/product_applic
 ```
 
 ### Key Examples
+
+**Progressive learning path** (start here if you're new — each builds on the previous):
+
+| Example | Path | What you learn |
+|---------|------|----------------|
+| 1. Single Agent | `examples/startup_app/demo_startup_app_with_single_agent/` | Minimal wiring: one agent + one LLM |
+| 2. + Actions | `examples/startup_app/demo_startup_app_with_single_agent_and_actions/` | Adding tools to an agent |
+| 3. + Memory | `examples/startup_app/demo_startup_app_with_single_agent_and_memory/` | Adding conversation memory |
+| 4. Multi-Agent | `examples/startup_app/demo_startup_app_with_multi_agents/` | Multiple agents collaborating |
+| 5. Templates | `examples/startup_app/demo_startup_app_with_agent_templates/` | Custom agent templates |
+
+**Full-featured examples:**
+
 | Example | Path | Description |
 |---------|------|-------------|
-| Standard Project Scaffold | `examples/sample_standard_app/` | Template for new projects |
+| Standard Project Scaffold | `examples/sample_standard_app/` | Production template with all config files |
 | PEER Multi-Agent | `examples/sample_apps/peer_agent_app/` | PEER pattern financial event analysis |
-| RAG Agent | `examples/sample_apps/rag_app/` | Knowledge base + RAG |
+| RAG Agent | `examples/sample_apps/rag_app/` | Knowledge base + RAG pipeline |
 | ReAct Agent | `examples/sample_apps/react_agent_app/` | ReAct pattern agent |
 | Discussion Group | `examples/sample_apps/discussion_group_app/` | Multi-turn multi-agent discussion |
 | Simple QA Agent | `examples/sample_apps/simple_qa_agent_app/` | Minimal single-agent example |
@@ -280,6 +300,91 @@ Two agent roles: `implementation` + `supervision`. Parameters: `checkpoint_count
 
 ### DOE (Data-fining/Opinion-inject/Express)
 Referenced in README/docs but not yet a standalone work pattern class in the codebase. Described as 3 agents for data-intensive tasks: Data-fining (precision computation), Opinion-inject (merge data + expert opinions), Express (format output).
+
+## Python Crash Course for Node.js Developers
+
+This codebase uses these Python patterns extensively. If you're coming from JS/TS, here's what to watch for:
+
+### Syntax & Module System
+
+| Python | Node.js equivalent | Notes |
+|--------|-------------------|-------|
+| `import foo` / `from pkg import Cls` | `require('foo')` / `const { Cls } = require('pkg')` | Python has both module-level and symbol-level imports |
+| `__init__.py` (can be empty) | `index.js` or `package.json` `"exports"` | **Required** for a directory to be importable as a package |
+| `if __name__ == "__main__"` | `if (require.main === module)` | Guard code that only runs when file is executed directly |
+| `sys.path` | `NODE_PATH` + `node_modules` resolution | List of directories Python searches for imports |
+
+### Classes & Methods
+
+| Python | Node.js equivalent | Notes |
+|--------|-------------------|-------|
+| `self` (first param of every method) | `this` (implicit) | Python is **explicit** — `self` must be written out |
+| `@classmethod` → `cls` param | `static` methods in JS classes | `cls` is the class itself (≈ `this.constructor`) |
+| `@staticmethod` | `static` methods (no `this`) | No implicit first argument |
+| `super().__init__(...)` | `super(...)` | Python requires explicit `super()` call |
+
+### Decorators (`@something`)
+
+Think of them as **higher-order function wrappers**, applied at definition time:
+
+```python
+@singleton          # ≈ module-scoped singleton instance
+class Foo:
+    ...
+```
+
+Common decorators in this codebase:
+- `@singleton` — ensures only one instance, stored as module-level global
+- `@lru_cache(maxsize=N)` — memoization with LRU eviction (≈ `memoizee` / `lru-cache` npm package)
+- `@classmethod` — method that receives the class (`cls`) instead of instance (`self`) as first arg
+
+### Type Hints (Python's TypeScript — but optional)
+
+```python
+def foo(x: str, y: int = 0) -> str | None:   # ≈ (x: string, y?: number): string | null
+    ...
+```
+
+Key differences from TypeScript:
+- **Not enforced at runtime** — it's purely documentation unless you run `mypy` separately (≈ `tsc --noEmit`)
+- `str | None` ≈ `string | null` (Python 3.10+)
+- `list[str]` ≈ `Array<string>` (Python 3.9+)
+- `Optional[str]` ≈ `string | undefined` (older style, prefer `str | None`)
+
+### Pydantic Models
+
+Heavily used for configuration objects. Roughly ≈ a `zod` schema or TypeScript `interface` with runtime validation:
+
+```python
+from pydantic import BaseModel
+class AgentModel(BaseModel):
+    name: str
+    temperature: float = 0.1    # default value ≈ optional property
+```
+
+Pydantic auto-validates types on construction and throws if mismatched. Like `zod.parse()` but implicit.
+
+### Common Python Gotchas
+
+1. **No `const`/`let`** — Python uses plain assignment. Convention: `UPPER_CASE` for constants.
+2. **Truthiness**: `None`, `""`, `[]`, `{}`, `0` are all falsy — similar to JS but `[]` and `{}` are **falsy**, unlike JS where they're truthy.
+3. **`pass`** — Python's no-op statement. Used in empty `__init__.py` files or placeholder method bodies (≈ `{}` in JS).
+4. **List comprehensions** — `[x*2 for x in items if x > 0]` ≈ `items.filter(x => x > 0).map(x => x * 2)`.
+5. **`@property`** — getter/setter syntax sugar, ≈ `get`/`set` in JS but less common.
+
+## Recommended Reading Order
+
+For someone learning both Python and agentUniverse, follow this path from simple to complex:
+
+1. **`examples/startup_app/demo_startup_app_with_single_agent/`** — Minimal single-agent app. Read the YAML configs first (they're declarative), then the Python bootstrap. This shows the simplest wiring.
+2. **`agentuniverse/base/agentuniverse.py`** → `start()` method — Understand the startup flow. Maps to `dotenv` → `winston` → express → DI container init in Node.js terms.
+3. **`agentuniverse/agent/agent.py`** — The Agent base class. Understand how `profile`/`action`/`plan`/`memory`/`prompt` assemble into a runnable agent.
+4. **`agentuniverse/base/component/`** — How components are registered. `ComponentBase`, `ComponentEnum`, and the manager pattern. Maps to understanding a DI container's registry.
+5. **`agentuniverse/agent/work_pattern/peer_work_pattern.py`** — First multi-agent pattern. Shows how 4 agents collaborate in a loop.
+6. **`agentuniverse/llm/llm.py` + `llm/default/`** — LLM abstraction. How different vendors (OpenAI, Qwen, Claude, etc.) are wrapped behind a common interface.
+7. **`agentuniverse/agent/action/knowledge/knowledge.py`** — RAG pipeline orchestration. How Reader → DocProcessor → Embedding → Store form a retrieval chain.
+
+For project initialization, see the companion guide: `scaffold_init_guide.md` (written from Node.js developer perspective).
 
 ## Conventions
 - Config files use `${VAR_NAME}` placeholder syntax resolved from `custom_key.toml`
