@@ -13,3 +13,5 @@ This pattern utilizes four distinct agent roles: Plan, Execute, Express, and Rev
 This pattern consists of three agents: Data-fining agent, which is designed to solve data-intensive and high-computational-precision task; Opinion-inject agent, which combines the data results from first agent and the expert opinions which are pre-collected and structured; the third agent, Express agent generates the final result base on given document type and language style.
 
 More patterns are coming soon...
+
+
