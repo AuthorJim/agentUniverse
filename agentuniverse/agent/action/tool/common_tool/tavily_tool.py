@@ -11,7 +11,7 @@ from typing import Any, Dict, Literal, Optional, List
 from pydantic import Field
 
 from agentuniverse.agent.action.tool.tool import Tool, ToolInput
-from agentuniverse.agent.action.tool.enum import ToolTypeEnum
+from agentuniverse.agent.action.tool.tool_type_enum import ToolTypeEnum
 from agentuniverse.base.util.env_util import get_from_env
 from agentuniverse.base.util.logging.logging_util import LOGGER
 

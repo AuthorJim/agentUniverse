@@ -13,7 +13,7 @@ from typing import List, Optional, get_type_hints, Any
 from pydantic import BaseModel
 from langchain.tools import Tool as LangchainTool
 
-from agentuniverse.agent.action.tool.enum import ToolTypeEnum
+from agentuniverse.agent.action.tool.tool_type_enum import ToolTypeEnum
 from agentuniverse.base.annotation.trace import trace_tool
 from agentuniverse.base.component.component_base import ComponentBase
 from agentuniverse.base.component.component_enum import ComponentEnum

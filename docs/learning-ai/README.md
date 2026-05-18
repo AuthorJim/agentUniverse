@@ -50,6 +50,7 @@
 | | [10](10-is-pattern.md) | IS 模式 | 执行+监督二人组怎么工作？ |
 | | [11](11-peer-pattern.md) | PEER 模式 | 4 个 Agent 怎么像一支工程团队？ |
 | **实践** | [12](12-building-your-own.md) | 从零搭建应用 | 怎么把学到的全用上？ |
+| **深入** | [13](13-langchain-adapter-pattern.md) | LangChain 适配器模式 | 框架怎么"用"LangChain 而不"绑"LangChain？ |
 
 ---
 
@@ -88,7 +89,8 @@ poetry install
 
 ## 补充阅读
 
-- [pyproject.toml 完全指南（Node.js 工程师视角）](python-ecosystem/pyproject-toml-guide.md) — 读完 01 后建议看这篇，理解 Python 的包管理生态
+- [Poetry 实战指南：从 npm 思维到 Python 包管理](python-ecosystem/poetry-usage-guide.md) — Poetry 怎么用？和 npm 什么对应关系？日常命令速查
+- [pyproject.toml 完全指南（Node.js 工程师视角）](python-ecosystem/pyproject-toml-guide.md) — 深入理解 Python 项目的"身份证"配置文件
 
 ---
 
