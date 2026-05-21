@@ -91,6 +91,7 @@ poetry install
 
 - [Poetry 实战指南：从 npm 思维到 Python 包管理](python-ecosystem/poetry-usage-guide.md) — Poetry 怎么用？和 npm 什么对应关系？日常命令速查
 - [pyproject.toml 完全指南（Node.js 工程师视角）](python-ecosystem/pyproject-toml-guide.md) — 深入理解 Python 项目的"身份证"配置文件
+- [start() 函数完整执行追踪](start-function-full-trace.md) — 第 3 章补充：逐行追踪真实源码，从 `start()` 到所有组件就绪的完整调用链
 
 ---
 

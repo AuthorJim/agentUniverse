@@ -79,7 +79,7 @@ class AgentUniverse(object):
         configer = Configer(path=config_path).load()
 
         # try to load custom key first
-        custom_key_configer_path = self.__parse_sub_config_path(
+        custom_key_configer_path=self.__parse_sub_config_path(
             configer.value.get('SUB_CONFIG_PATH', {}).get('custom_key_path'),
             config_path)
         CustomKeyConfiger(custom_key_configer_path)

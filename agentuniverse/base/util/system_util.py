@@ -24,6 +24,7 @@ def get_project_root_path() -> Path:
     if PROJECT_ROOT_PATH:
         return PROJECT_ROOT_PATH
     current_work_directory = Path.cwd()
+
     root_path = current_work_directory.parents[1]
     PROJECT_ROOT_PATH = root_path
     return root_path
